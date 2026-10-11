@@ -147,8 +147,8 @@ def sim_state(treated: bool, p: float) -> dict:
     """Return the normalised degradation variables for a given cell/progress."""
     if p < 0:
         return dict(ox=0.0, dist=0.0, phase=0.0, s=0.0)
-    s = smoothstep((p - 0.2) / 0.7)                 # overall degradation driver
-    if treated:                                     # PTM: nothing structural happens
+    s = smoothstep((p - 0.2) / 0.7)                  # overall degradation driver
+    if treated:                                      # PTM: nothing structural happens
         return dict(ox=0.0, dist=0.0, phase=0.0, s=s)
     return dict(
         ox=float(np.clip((p - 0.2) / 0.6, 0, 1)),    # Sn2+ → Sn4+
@@ -328,16 +328,17 @@ def build_figure(treated: bool, p: float) -> go.Figure:
 
     # Vacancies / defects (red open symbols)
     n_sv, n_iv = int(sn_vac.sum()), int(i_vac.sum())
-    fig.add_trace(go.Scatter(
-        x=np.concatenate([sn_x[sn_vac], i_x[i_vac]]),
-        y=np.concatenate([sn_y[sn_vac], i_y[i_vac]]),
-        mode="markers", name="Vacancy / defect", hoverinfo="name",
-        marker=dict(
-            symbol=["square-open"] * n_sv + ["circle-open"] * n_iv,
-            size=[22] * n_sv + [15] * n_iv,
-            color=C_DEFECT, line=dict(color=C_DEFECT, width=2.5),
-        ),
-    ))
+    if n_sv + n_iv > 0:
+        fig.add_trace(go.Scatter(
+            x=np.concatenate([sn_x[sn_vac], i_x[i_vac]]),
+            y=np.concatenate([sn_y[sn_vac], i_y[i_vac]]),
+            mode="markers", name="Vacancy / defect", hoverinfo="name",
+            marker=dict(
+                symbol=["square-open"] * n_sv + ["circle-open"] * n_iv,
+                size=[22] * n_sv + [15] * n_iv,
+                color=C_DEFECT, line=dict(color=C_DEFECT, width=2.5),
+            ),
+        ))
 
     # ── 4c. Oxygen molecules ────────────────────────────────────────────────
     ox_x, ox_y = [], []
@@ -357,10 +358,11 @@ def build_figure(treated: bool, p: float) -> go.Figure:
                 x = AIR_X + (O2_TX[j] - AIR_X) * frac
             ox_x += [x, x]
             ox_y += [O2_Y[j] + 0.17, O2_Y[j] - 0.17]
-    fig.add_trace(go.Scatter(
-        x=ox_x, y=ox_y, mode="markers", name="O₂", hoverinfo="name",
-        marker=dict(size=10, color=C_OXYGEN, line=dict(color="white", width=1)),
-    ))
+        if ox_x:
+            fig.add_trace(go.Scatter(
+                x=ox_x, y=ox_y, mode="markers", name="O₂", hoverinfo="name",
+                marker=dict(size=10, color=C_OXYGEN, line=dict(color="white", width=1)),
+            ))
 
     # ── 4d. Photons ─────────────────────────────────────────────────────────
     beam_x = np.linspace(1.0, 9.0, 6)
@@ -377,10 +379,10 @@ def build_figure(treated: bool, p: float) -> go.Figure:
             x=bxs, y=bys, mode="lines", hoverinfo="skip", showlegend=False,
             line=dict(color="rgba(255,212,0,0.35)", width=1.5, dash="dot"),
         ))
-    fig.add_trace(go.Scatter(
-        x=ph_x, y=ph_y, mode="markers", name="Photon", hoverinfo="name",
-        marker=dict(symbol="triangle-down", size=12, color="#FFEB3B", line=dict(color="#FF8F00", width=1)),
-    ))
+        fig.add_trace(go.Scatter(
+            x=ph_x, y=ph_y, mode="markers", name="Photon", hoverinfo="name",
+            marker=dict(symbol="triangle-down", size=12, color="#FFEB3B", line=dict(color="#FF8F00", width=1)),
+        ))
 
     # ── 4e. Right-hand labels & status tags ─────────────────────────────────
     if phase > 0.5:
@@ -424,7 +426,7 @@ def build_figure(treated: bool, p: float) -> go.Figure:
         margin=dict(l=4, r=4, t=6, b=62),
         paper_bgcolor=FIG_BG, plot_bgcolor=FIG_BG,
         font=dict(color="#E8ECF4"),
-        uirevision="solar-cell",
+        uirevision="constant",  # IMPORTANT: prevents auto-zooming / full redraws
         xaxis=dict(range=[-3.2, 14.8], visible=False, fixedrange=True),
         yaxis=dict(range=[1.3, 15.7], visible=False, fixedrange=True),
         legend=dict(orientation="h", yanchor="top", y=-0.01, x=0.5, xanchor="center",
@@ -449,24 +451,33 @@ def render_metrics(slot, treated: bool, ind: dict, other: dict) -> None:
         d_cond = f"{ind['cond'] - 100:+.0f} pts vs. fresh" if started else None
         d_sn = f"{ind['sn4']:+.0f} pts vs. fresh" if started else None
 
-    slot["pce"].metric("PCE", f"{ind['pce']:.1f}%", delta=d_pce,
-                       help="Power conversion efficiency (headline scenario values).")
-    slot["cond"].metric("Conductivity", f"{ind['cond']:.0f}%", delta=d_cond,
-                        help="Relative electrical conductivity (illustrative index, fresh = 100 %).")
-    slot["sn4"].metric("Sn⁴⁺ share", f"{ind['sn4']:.0f}%", delta=d_sn, delta_color="inverse",
-                       help="Fraction of tin oxidised from Sn²⁺ to Sn⁴⁺ (lower is better).")
+    # Using st.columns inside a placeholder preserves layout without flickering
+    c1, c2, c3 = slot.columns(3)
+    c1.metric("PCE", f"{ind['pce']:.1f}%", delta=d_pce,
+              help="Power conversion efficiency (headline scenario values).")
+    c2.metric("Conductivity", f"{ind['cond']:.0f}%", delta=d_cond,
+              help="Relative electrical conductivity (illustrative index, fresh = 100 %).")
+    c3.metric("Sn⁴⁺ share", f"{ind['sn4']:.0f}%", delta=d_sn, delta_color="inverse",
+              help="Fraction of tin oxidised from Sn²⁺ to Sn⁴⁺ (lower is better).")
 
 
 def render_status(slot, treated: bool, p: float) -> None:
     kind, text = status_message(treated, p)
-    getattr(slot, kind)(text)
+    if kind == "success":
+        slot.success(text)
+    elif kind == "error":
+        slot.error(text)
+    elif kind == "warning":
+        slot.warning(text)
+    else:
+        slot.info(text)
 
 
 def render_frame(p: float, slots: dict) -> None:
     """Draw both cells + captions + metrics for progress p."""
     ind = {False: indicators(False, p), True: indicators(True, p)}
     for treated, key in ((False, "std"), (True, "ptm")):
-        slots[key]["chart"].plotly_chart(build_figure(treated, p), config=PLOT_CONFIG)
+        slots[key]["chart"].plotly_chart(build_figure(treated, p), config=PLOT_CONFIG, use_container_width=True)
         render_status(slots[key]["status"], treated, p)
         render_metrics(slots[key]["metrics"], treated, ind[treated], ind[not treated])
 
@@ -499,7 +510,7 @@ def _render_summary_body() -> None:
         yaxis=dict(title="PCE (%)", range=[0, 12]),
         legend=dict(orientation="h", y=-0.25), margin=dict(l=10, r=10, t=50, b=10),
     )
-    left.plotly_chart(fig1, config=PLOT_CONFIG)
+    left.plotly_chart(fig1, config=PLOT_CONFIG, use_container_width=True)
 
     # Final-state indicators (all as % so they share one axis)
     a, b = indicators(False, 1.0), indicators(True, 1.0)
@@ -517,7 +528,7 @@ def _render_summary_body() -> None:
         yaxis=dict(range=[0, 125]), legend=dict(orientation="h", y=-0.25),
         margin=dict(l=10, r=10, t=50, b=10),
     )
-    right.plotly_chart(fig2, config=PLOT_CONFIG)
+    right.plotly_chart(fig2, config=PLOT_CONFIG, use_container_width=True)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -610,12 +621,10 @@ progress_slot = st.empty()
 # ──────────────────────────────────────────────────────────────────────────────
 def make_cell_slots() -> dict:
     """Create every placeholder ONCE (outside the animation loop)."""
-    chart = st.empty()
     status = st.empty()
-    c1, c2, c3 = st.columns(3)
-    metrics = dict(pce=c1.empty(), cond=c2.empty(), sn4=c3.empty())
-    return dict(chart=chart, status=status, metrics=metrics)
-
+    chart = st.empty()
+    metrics = st.empty()
+    return dict(status=status, chart=chart, metrics=metrics)
 
 col_std, col_ptm = st.columns(2, gap="large")
 slots = {}
