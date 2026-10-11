@@ -424,6 +424,7 @@ def build_figure(treated: bool, p: float) -> go.Figure:
         margin=dict(l=4, r=4, t=6, b=62),
         paper_bgcolor=FIG_BG, plot_bgcolor=FIG_BG,
         font=dict(color="#E8ECF4"),
+        uirevision="solar-cell",
         xaxis=dict(range=[-3.2, 14.8], visible=False, fixedrange=True),
         yaxis=dict(range=[1.3, 15.7], visible=False, fixedrange=True),
         legend=dict(orientation="h", yanchor="top", y=-0.01, x=0.5, xanchor="center",
@@ -436,26 +437,24 @@ def build_figure(treated: bool, p: float) -> go.Figure:
 # 5. STREAMLIT RENDER HELPERS
 # ──────────────────────────────────────────────────────────────────────────────
 def render_metrics(slot, treated: bool, ind: dict, other: dict) -> None:
-    """Three st.metric cards with red/green delta arrows."""
-    with slot.container():
-        c1, c2, c3 = st.columns(3)
-        started = ind["s"] > 0.01 or other["s"] > 0.01
+    """Update the three pre-built st.metric placeholders in place (no re-layout)."""
+    started = ind["s"] > 0.01 or other["s"] > 0.01
 
-        if treated:   # compare the PTM cell against the standard cell
-            d_pce = f"{ind['pce'] - other['pce']:+.1f} pp vs. standard" if started else None
-            d_cond = f"{ind['cond'] - other['cond']:+.0f} pts vs. standard" if started else None
-            d_sn = f"{ind['sn4'] - other['sn4']:+.0f} pts vs. standard" if started else None
-        else:         # compare the standard cell against its own fresh state
-            d_pce = f"{ind['pce'] - PCE_FRESH:+.1f} pp vs. fresh" if started else None
-            d_cond = f"{ind['cond'] - 100:+.0f} pts vs. fresh" if started else None
-            d_sn = f"{ind['sn4']:+.0f} pts vs. fresh" if started else None
+    if treated:   # compare the PTM cell against the standard cell
+        d_pce = f"{ind['pce'] - other['pce']:+.1f} pp vs. standard" if started else None
+        d_cond = f"{ind['cond'] - other['cond']:+.0f} pts vs. standard" if started else None
+        d_sn = f"{ind['sn4'] - other['sn4']:+.0f} pts vs. standard" if started else None
+    else:         # compare the standard cell against its own fresh state
+        d_pce = f"{ind['pce'] - PCE_FRESH:+.1f} pp vs. fresh" if started else None
+        d_cond = f"{ind['cond'] - 100:+.0f} pts vs. fresh" if started else None
+        d_sn = f"{ind['sn4']:+.0f} pts vs. fresh" if started else None
 
-        c1.metric("PCE", f"{ind['pce']:.1f}%", delta=d_pce,
-                  help="Power conversion efficiency (headline scenario values).")
-        c2.metric("Conductivity", f"{ind['cond']:.0f}%", delta=d_cond,
-                  help="Relative electrical conductivity (illustrative index, fresh = 100 %).")
-        c3.metric("Sn⁴⁺ share", f"{ind['sn4']:.0f}%", delta=d_sn, delta_color="inverse",
-                  help="Fraction of tin oxidised from Sn²⁺ to Sn⁴⁺ (lower is better).")
+    slot["pce"].metric("PCE", f"{ind['pce']:.1f}%", delta=d_pce,
+                       help="Power conversion efficiency (headline scenario values).")
+    slot["cond"].metric("Conductivity", f"{ind['cond']:.0f}%", delta=d_cond,
+                        help="Relative electrical conductivity (illustrative index, fresh = 100 %).")
+    slot["sn4"].metric("Sn⁴⁺ share", f"{ind['sn4']:.0f}%", delta=d_sn, delta_color="inverse",
+                       help="Fraction of tin oxidised from Sn²⁺ to Sn⁴⁺ (lower is better).")
 
 
 def render_status(slot, treated: bool, p: float) -> None:
@@ -472,8 +471,13 @@ def render_frame(p: float, slots: dict) -> None:
         render_metrics(slots[key]["metrics"], treated, ind[treated], ind[not treated])
 
 
-def render_summary() -> None:
-    """Head-to-head charts shown after the simulation has finished."""
+def render_summary(slot) -> None:
+    """Head-to-head charts shown after the simulation has finished (drawn into `slot`)."""
+    with slot.container():
+        _render_summary_body()
+
+
+def _render_summary_body() -> None:
     st.markdown("### Head-to-head summary")
     left, right = st.columns(2, gap="large")
 
@@ -604,15 +608,26 @@ progress_slot = st.empty()
 # ──────────────────────────────────────────────────────────────────────────────
 # 9. SIDE-BY-SIDE CELLS  (placeholders so the animation can overwrite them)
 # ──────────────────────────────────────────────────────────────────────────────
+def make_cell_slots() -> dict:
+    """Create every placeholder ONCE (outside the animation loop)."""
+    chart = st.empty()
+    status = st.empty()
+    c1, c2, c3 = st.columns(3)
+    metrics = dict(pce=c1.empty(), cond=c2.empty(), sn4=c3.empty())
+    return dict(chart=chart, status=status, metrics=metrics)
+
+
 col_std, col_ptm = st.columns(2, gap="large")
 slots = {}
 with col_std:
     st.markdown('<div class="cell-tag cell-std">Standard CsSnI₃ solar cell</div>', unsafe_allow_html=True)
-    slots["std"] = dict(chart=st.empty(), status=st.empty(), metrics=st.empty())
+    slots["std"] = make_cell_slots()
 with col_ptm:
     st.markdown('<div class="cell-tag cell-ptm">PTM-treated CsSnI₃ solar cell '
                 '(localized electron density engineering)</div>', unsafe_allow_html=True)
-    slots["ptm"] = dict(chart=st.empty(), status=st.empty(), metrics=st.empty())
+    slots["ptm"] = make_cell_slots()
+
+summary_slot = st.empty()      # head-to-head charts appear here after the run
 
 # ──────────────────────────────────────────────────────────────────────────────
 # 10. RUN / SHOW STATE
@@ -626,10 +641,10 @@ if run_clicked:
         time.sleep(FRAME_DELAY)
     progress_slot.empty()
     st.session_state["done"] = True
-    render_summary()
+    render_summary(summary_slot)
 elif st.session_state["done"]:
     render_frame(1.0, slots)       # keep the final state on screen after reruns
-    render_summary()
+    render_summary(summary_slot)
 else:
     render_frame(-1.0, slots)      # pristine, before exposure
 
